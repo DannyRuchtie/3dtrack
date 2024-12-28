@@ -83,30 +83,38 @@
         async function initSpline() {
             try {
                 const canvas = document.getElementById('canvas3d');
-                // Create the application
-                const app = new Application(canvas);
+                // Create the application with controls disabled
+                const app = new Application(canvas, {
+                    controls: false, // Disable default controls
+                    autoRender: true,
+                    autoResize: true
+                });
                 window.splineApp = app;
                 
                 // Load the scene and wait for it to complete
                 await app.load('https://prod.spline.design/3pAzXsubpMgrqCEh/scene.splinecode');
                 
-                // Try to find the camera
-                const allObjects = app.getAllObjects();
-                console.log('Available objects:', allObjects);
-                
                 // Get camera by ID since we know it
-                window.splineCamera = app.findObjectById('8453eac7-6b70-4e84-b023-9ee707c7a4da');
+                window.splineCamera = app.findObjectById('56c30b36-44df-48b7-89f1-27070018dad0');
                 if (window.splineCamera) {
-                    console.log('Found camera:', window.splineCamera);
-                    // Log initial position to verify we can access it
-                    console.log('Initial camera position:', {
+                    // Store initial camera position as base position
+                    window.cameraBasePosition = {
                         x: window.splineCamera.position.x,
                         y: window.splineCamera.position.y,
                         z: window.splineCamera.position.z
-                    });
+                    };
+                    console.log('Initial camera position:', window.cameraBasePosition);
+
+                    // Disable any existing controls on the camera
+                    if (window.splineCamera.controls) {
+                        window.splineCamera.controls.enabled = false;
+                    }
                 } else {
                     console.error('Could not find camera');
                 }
+
+                // Log available variables
+                console.log('Available variables:', app.getVariables());
                 
                 return true;
             } catch (error) {
@@ -267,49 +275,45 @@
                             faceInfo.cameraZ = mappedZ;
 
                             // Update Spline camera if available
-                            if (window.splineCamera) {
+                            if (window.splineApp && window.splineCamera) {
                                 try {
-                                    // Get current position
-                                    const currentX = window.splineCamera.position.x || 0;
-                                    const currentY = window.splineCamera.position.y || 0;
-                                    const currentZ = window.splineCamera.position.z || 0;
+                                    // Calculate new camera position
+                                    const newX = 502.55 + (normalizedX * 50);
+                                    const newY = 345.11 + (normalizedY * 50);
+                                    const newZ = 444.65 + ((faceSize - 0.4) * 50);
 
-                                    // Calculate new position
-                                    const newX = currentX + (mappedX - currentX) * CAMERA_LERP_FACTOR;
-                                    const newY = currentY + ((mappedY + 2) - currentY) * CAMERA_LERP_FACTOR;
-                                    const newZ = currentZ + (mappedZ - currentZ) * CAMERA_LERP_FACTOR;
+                                    // Update camera position directly
+                                    window.splineCamera.position.x = newX;
+                                    window.splineCamera.position.y = newY;
+                                    window.splineCamera.position.z = newZ;
 
-                                    // Update position through the proxy
-                                    window.splineCamera.position = {
-                                        x: newX,
-                                        y: newY,
-                                        z: newZ
-                                    };
+                                    // Force a render update
+                                    window.splineApp.render();
+
+                                    // Update debug info
+                                    const debugOverlay = document.getElementById('debug-overlay');
+                                    debugOverlay.innerHTML = `
+                                        Face Tracking Info:<br>
+                                        X: ${normalizedX.toFixed(2)}<br>
+                                        Y: ${normalizedY.toFixed(2)}<br>
+                                        Size: ${faceSize.toFixed(2)}<br>
+                                        <br>
+                                        Camera Position:<br>
+                                        X: ${newX.toFixed(2)}<br>
+                                        Y: ${newY.toFixed(2)}<br>
+                                        Z: ${newZ.toFixed(2)}
+                                    `;
 
                                     // Log position updates for debugging
-                                    console.log('Camera position updated:', {
+                                    console.log('Setting camera position:', {
                                         x: newX,
                                         y: newY,
                                         z: newZ
                                     });
                                 } catch (err) {
-                                    console.error('Error updating camera:', err);
+                                    console.error('Error updating camera position:', err.message);
                                 }
                             }
-
-                            // Update debug overlay
-                            const debugOverlay = document.getElementById('debug-overlay');
-                            debugOverlay.innerHTML = `
-                                Face Tracking Info:<br>
-                                X: ${faceInfo.normalizedX.toFixed(2)}<br>
-                                Y: ${faceInfo.normalizedY.toFixed(2)}<br>
-                                Size: ${faceInfo.faceSize.toFixed(2)}<br>
-                                <br>
-                                Camera Position:<br>
-                                X: ${faceInfo.cameraX.toFixed(2)}<br>
-                                Y: ${faceInfo.cameraY.toFixed(2)}<br>
-                                Z: ${faceInfo.cameraZ.toFixed(2)}
-                            `;
                         } else {
                             console.log('No faces detected in this frame');
                             document.getElementById('debug-overlay').innerHTML = 'No face detected';
