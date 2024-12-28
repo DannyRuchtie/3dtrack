@@ -135,9 +135,9 @@
         const CAMERA_LERP_FACTOR = 0.1;
 
         const params = {
-            xSensitivity: 2,
-            ySensitivity: 2,
-            zSensitivity: 2,
+            xSensitivity: 5,
+            ySensitivity: 5,
+            zSensitivity: 5,
             confidenceThreshold: 0.1
         };
 
@@ -277,26 +277,54 @@
                             // Update Spline camera if available
                             if (window.splineApp && window.splineCamera) {
                                 try {
-                                    // Calculate new camera position with GUI-controlled sensitivity
-                                    const sensitivityX = 100 * params.xSensitivity; // Scale base sensitivity by GUI control
-                                    const sensitivityY = 100 * params.ySensitivity; // Scale base sensitivity by GUI control
-                                    const sensitivityZ = 200 * params.zSensitivity; // Scale base sensitivity by GUI control
-                                    
                                     // Get base position from stored values
                                     const baseX = window.cameraBasePosition.x;
                                     const baseY = window.cameraBasePosition.y;
                                     const baseZ = window.cameraBasePosition.z;
 
                                     // Calculate new positions with GUI-controlled sensitivity
+                                    const sensitivityX = 100 * params.xSensitivity;
+                                    const sensitivityY = 100 * params.ySensitivity;
+                                    const sensitivityZ = 400 * params.zSensitivity;
+
                                     const newX = baseX + (-normalizedX * sensitivityX);
                                     const newY = baseY + (-normalizedY * sensitivityY);
-                                    const newZ = baseZ - ((faceSize - 0.4) * sensitivityZ);
+                                    
+                                    // Check if camera is orthographic or perspective
+                                    const isOrthographic = window.splineCamera.type === 'OrthographicCamera';
+                                    console.log('Camera type:', window.splineCamera.type);
 
                                     // Use GUI-controlled confidence for interpolation
                                     const lerpFactor = params.confidenceThreshold;
+
+                                    // Handle Z movement based on camera type
+                                    const neutralFaceSize = 0.25;
+                                    const zOffset = (faceSize - neutralFaceSize) * sensitivityZ;
+                                    let currentZoom = window.splineCamera.zoom || 1;
+
+                                    if (isOrthographic) {
+                                        // For orthographic camera, adjust zoom instead of Z position
+                                        // Store initial zoom if not already stored
+                                        if (!window.cameraBaseZoom) {
+                                            window.cameraBaseZoom = currentZoom;
+                                        }
+                                        
+                                        // Larger face = smaller zoom value (zooms in)
+                                        const zoomChange = zOffset / 1000; // Made more sensitive
+                                        const targetZoom = window.cameraBaseZoom * (1 - zoomChange);
+                                        
+                                        // Clamp zoom value to prevent extreme values
+                                        const clampedZoom = Math.max(0.5, Math.min(2, targetZoom));
+                                        
+                                        // Smoothly interpolate zoom
+                                        window.splineCamera.zoom = currentZoom + (clampedZoom - currentZoom) * lerpFactor;
+                                        
+                                        console.log('Orthographic: Face size:', faceSize, 'New zoom:', window.splineCamera.zoom);
+                                    }
+
+                                    // Update position with interpolation
                                     window.splineCamera.position.x += (newX - window.splineCamera.position.x) * lerpFactor;
                                     window.splineCamera.position.y += (newY - window.splineCamera.position.y) * lerpFactor;
-                                    window.splineCamera.position.z += (newZ - window.splineCamera.position.z) * lerpFactor;
 
                                     // Force a render update
                                     window.splineApp.render();
@@ -309,17 +337,19 @@
                                         Y: ${normalizedY.toFixed(2)}<br>
                                         Size: ${faceSize.toFixed(2)}<br>
                                         <br>
-                                        Camera Position:<br>
+                                        Camera Info:<br>
+                                        Type: ${isOrthographic ? 'Orthographic' : 'Perspective'}<br>
                                         X: ${newX.toFixed(2)}<br>
                                         Y: ${newY.toFixed(2)}<br>
-                                        Z: ${newZ.toFixed(2)}
+                                        Zoom: ${window.splineCamera.zoom.toFixed(2)}
                                     `;
 
-                                    // Log position updates for debugging
-                                    console.log('Setting camera position:', {
-                                        x: newX,
-                                        y: newY,
-                                        z: newZ
+                                    // Log updates for debugging
+                                    console.log('Camera state:', {
+                                        x: window.splineCamera.position.x,
+                                        y: window.splineCamera.position.y,
+                                        zoom: window.splineCamera.zoom,
+                                        faceSize
                                     });
                                 } catch (err) {
                                     console.error('Error updating camera position:', err.message);
