@@ -277,15 +277,26 @@
                             // Update Spline camera if available
                             if (window.splineApp && window.splineCamera) {
                                 try {
-                                    // Calculate new camera position
-                                    const newX = 502.55 + (normalizedX * 50);
-                                    const newY = 345.11 + (normalizedY * 50);
-                                    const newZ = 444.65 + ((faceSize - 0.4) * 50);
+                                    // Calculate new camera position with increased sensitivity
+                                    const sensitivityX = 100; // Doubled from 50
+                                    const sensitivityY = 100; // Doubled from 50
+                                    const sensitivityZ = 200; // Quadrupled for more noticeable depth movement
+                                    
+                                    // Get base position from stored values
+                                    const baseX = window.cameraBasePosition.x;
+                                    const baseY = window.cameraBasePosition.y;
+                                    const baseZ = window.cameraBasePosition.z;
 
-                                    // Update camera position directly
-                                    window.splineCamera.position.x = newX;
-                                    window.splineCamera.position.y = newY;
-                                    window.splineCamera.position.z = newZ;
+                                    // Calculate new positions with increased range and reversed directions
+                                    const newX = baseX + (-normalizedX * sensitivityX); // Negated X
+                                    const newY = baseY + (-normalizedY * sensitivityY); // Negated Y
+                                    // Adjust Z based on face size - closer face = camera moves forward
+                                    const newZ = baseZ - ((faceSize - 0.4) * sensitivityZ);
+
+                                    // Smoothly interpolate to new position
+                                    window.splineCamera.position.x += (newX - window.splineCamera.position.x) * 0.1;
+                                    window.splineCamera.position.y += (newY - window.splineCamera.position.y) * 0.1;
+                                    window.splineCamera.position.z += (newZ - window.splineCamera.position.z) * 0.1;
 
                                     // Force a render update
                                     window.splineApp.render();
