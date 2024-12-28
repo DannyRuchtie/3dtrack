@@ -277,26 +277,26 @@
                             // Update Spline camera if available
                             if (window.splineApp && window.splineCamera) {
                                 try {
-                                    // Calculate new camera position with increased sensitivity
-                                    const sensitivityX = 100; // Doubled from 50
-                                    const sensitivityY = 100; // Doubled from 50
-                                    const sensitivityZ = 200; // Quadrupled for more noticeable depth movement
+                                    // Calculate new camera position with GUI-controlled sensitivity
+                                    const sensitivityX = 100 * params.xSensitivity; // Scale base sensitivity by GUI control
+                                    const sensitivityY = 100 * params.ySensitivity; // Scale base sensitivity by GUI control
+                                    const sensitivityZ = 200 * params.zSensitivity; // Scale base sensitivity by GUI control
                                     
                                     // Get base position from stored values
                                     const baseX = window.cameraBasePosition.x;
                                     const baseY = window.cameraBasePosition.y;
                                     const baseZ = window.cameraBasePosition.z;
 
-                                    // Calculate new positions with increased range and reversed directions
-                                    const newX = baseX + (-normalizedX * sensitivityX); // Negated X
-                                    const newY = baseY + (-normalizedY * sensitivityY); // Negated Y
-                                    // Adjust Z based on face size - closer face = camera moves forward
+                                    // Calculate new positions with GUI-controlled sensitivity
+                                    const newX = baseX + (-normalizedX * sensitivityX);
+                                    const newY = baseY + (-normalizedY * sensitivityY);
                                     const newZ = baseZ - ((faceSize - 0.4) * sensitivityZ);
 
-                                    // Smoothly interpolate to new position
-                                    window.splineCamera.position.x += (newX - window.splineCamera.position.x) * 0.1;
-                                    window.splineCamera.position.y += (newY - window.splineCamera.position.y) * 0.1;
-                                    window.splineCamera.position.z += (newZ - window.splineCamera.position.z) * 0.1;
+                                    // Use GUI-controlled confidence for interpolation
+                                    const lerpFactor = params.confidenceThreshold;
+                                    window.splineCamera.position.x += (newX - window.splineCamera.position.x) * lerpFactor;
+                                    window.splineCamera.position.y += (newY - window.splineCamera.position.y) * lerpFactor;
+                                    window.splineCamera.position.z += (newZ - window.splineCamera.position.z) * lerpFactor;
 
                                     // Force a render update
                                     window.splineApp.render();
