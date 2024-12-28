@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Face Tracking Camera + Heart Rate</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        /* Scene and overlays positioning */
+        #scene-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+        #video-overlay {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            width: 320px;
+            height: 240px;
+            z-index: 100;
+        }
+        #videoFeed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.8;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        #outputCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #debug-overlay {
+            position: fixed;
+            top: 20px;
+            left: 340px;
+            width: 280px;
+            height: auto;
+            min-height: 240px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 10px;
+            font-family: monospace;
+            border-radius: 4px;
+            z-index: 1000;
+        }
+        /* dat.GUI positioning */
+        .dg.ac {
+            position: fixed;
+            top: 20px !important;
+            right: 20px !important;
+            z-index: 2000 !important;
+        }
+        /* Heart rate graph and display */
+        #graphCanvas {
+            position: fixed;
+            top: 280px;
+            left: 340px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 4px;
+            width: 300px;
+            height: 150px;
+            z-index: 1000;
+            display: none !important;
+        }
+        #heartRateDisplay {
+            position: fixed;
+            top: 440px;
+            left: 340px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 4px;
+            margin: 0;
+            color: #fff;
+            font-family: monospace;
+            z-index: 1000;
+            width: 300px;
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="video-overlay">
+        <video id="videoFeed" autoplay></video>
+        <canvas id="outputCanvas"></canvas>
+    </div>
+    <div id="scene-container"></div>
+    <div id="debug-overlay"></div>
+    <canvas id="graphCanvas"></canvas>
+    <p id="heartRateDisplay">Waiting for face detection...</p>
+
+    <!-- dat.GUI -->
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OpenCV -->
+    <script async src="https://docs.opencv.org/4.7.0/opencv.js" onload="onOpenCvReady()"></script>
+
+    <script>
+        const FACE_CASCADE_URL = 'haarcascade_frontalface_default.xml';
+        const CAMERA_LERP_FACTOR = 0.1;
+
+        const params = {
+            xSensitivity: 4,
+            ySensitivity: 4,
+            zSensitivity: 3,
+            confidenceThreshold: 0.1
+        };
+
+        let video, outputCanvas, outputCtx, classifier;
+        let gui, guiVisible = true;
+
+        const three = {
+            scene: null,
+            camera: null,
+            renderer: null,
+            targetCameraPosition: null,
+            animationFrameId: null,
+            mixers: [],
+            clock: null,
+            cube: null
+        };
+
+        let videoOverlayVisible = true;
+        let debugOverlayVisible = true;
+
+        // Heart rate measurement constants
+        const BUFFER_SIZE = 64;
+        const GRAPH_WIDTH = 300;
+        const GRAPH_HEIGHT = 150;
+        const MAX_GRAPH_POINTS = 60;
+        const SAMPLING_RATE = 30;
+        const MIN_HR = 40;
+        const MAX_HR = 180;
+        const FILTER_LOW = 0.7;
+        const FILTER_HIGH = 3.0;
+
+        let graphCanvas = null;
+        let heartRateDisplay = null;
+        let signalGraph = null;
+        let temporalBuffer = [];
+        let lastUpdateTime = { value: 0 };
+        window.bpmHistory = [];
+
+        let faceInfo = { normalizedX: 0, normalizedY: 0, faceSize: 0, cameraX: 0, cameraY: 0, cameraZ: 0 };
+        let heartRate = 0; // updated from signal analysis
+
+        class SignalGraph {
+            constructor(canvas, width, height) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.width = width;
+                this.height = height;
+                this.data = [];
+            }
+
+            addPoint(value) {
+                this.data.push(value);
+                if (this.data.length > MAX_GRAPH_POINTS) {
+                    this.data.shift();
+                }
+            }
+
+            draw() {
+                const ctx = this.ctx;
+                ctx.clearRect(0, 0, this.width, this.height);
+                ctx.strokeStyle = '#fffffff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                if (this.data.length === 0) {
+                    return;
+                }
+
+                const maxValue = MAX_HR;
+                const minValue = MIN_HR;
+                const range = maxValue - minValue;
+
+                for (let i = 0; i < this.data.length; i++) {
+                    const x = (i / (MAX_GRAPH_POINTS - 1)) * this.width;
+                    const normalized = (this.data[i] - minValue) / range;
+                    const y = this.height - (normalized * this.height);
+
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+
+                ctx.stroke();
+            }
+        }
+
+        class FFT {
+            constructor(size) {
+                this.size = size;
+                this.real = new Float32Array(size);
+                this.imag = new Float32Array(size);
+                this.reverseTable = new Uint32Array(size);
+                this.initReverseTable();
+            }
+
+            initReverseTable() {
+                const size = this.size;
+                let limit = 1;
+                let bit = size >> 1;
+
+                while (limit < size) {
+                    for (let i = 0; i < limit; i++) {
+                        this.reverseTable[i + limit] = this.reverseTable[i] + bit;
+                    }
+                    limit = limit << 1;
+                    bit = bit >> 1;
+                }
+            }
+
+            forward(buffer) {
+                const size = this.size;
+                const cosTable = new Float32Array(size);
+                const sinTable = new Float32Array(size);
+                const reverseTable = this.reverseTable;
+                const real = this.real;
+                const imag = this.imag;
+
+                // Compute tables
+                for (let i = 0; i < size; i++) {
+                    cosTable[i] = Math.cos(-2 * Math.PI * i / size);
+                    sinTable[i] = Math.sin(-2 * Math.PI * i / size);
+                }
+
+                // Copy and apply reversal
+                for (let i = 0; i < size; i++) {
+                    real[i] = buffer[reverseTable[i]];
+                    imag[i] = 0;
+                }
+
+                // Perform FFT
+                let limit = 1;
+                while (limit < size) {
+                    const step = limit << 1;
+
+                    for (let i = 0; i < size; i += step) {
+                        for (let j = i, k = 0; j < i + limit; j++, k++) {
+                            const tmpReal = real[j + limit] * cosTable[k] - imag[j + limit] * sinTable[k];
+                            const tmpImag = real[j + limit] * sinTable[k] + imag[j + limit] * cosTable[k];
+
+                            real[j + limit] = real[j] - tmpReal;
+                            imag[j + limit] = imag[j] - tmpImag;
+                            real[j] += tmpReal;
+                            imag[j] += tmpImag;
+                        }
+                    }
+
+                    limit = step;
+                }
+            }
+        }
+
+        function calculateHeartRate(buffer) {
+            try {
+                const mean = buffer.reduce((a, b) => a + b) / buffer.length;
+                let normalized = buffer.map(x => x - mean);
+
+                // Hanning window
+                const hanning = normalized.map((val, idx) =>
+                    val * (0.5 - 0.5 * Math.cos(2 * Math.PI * idx / (buffer.length - 1)))
+                );
+
+                const paddedLength = Math.pow(2, Math.ceil(Math.log2(buffer.length)));
+                const padded = new Array(paddedLength).fill(0);
+                padded.splice(0, hanning.length, ...hanning);
+
+                const frequencies = new Array(paddedLength / 2).fill(0)
+                    .map((_, i) => i * SAMPLING_RATE / paddedLength);
+
+                const fft = new FFT(paddedLength);
+                fft.forward(padded);
+
+                const magnitudes = new Array(paddedLength / 2).fill(0);
+                for (let i = 0; i < paddedLength / 2; i++) {
+                    const real = fft.real[i];
+                    const imag = fft.imag[i];
+                    magnitudes[i] = Math.sqrt(real * real + imag * imag);
+                }
+
+                const filtered = magnitudes.map((mag, i) => {
+                    const freq = frequencies[i];
+                    if (freq < FILTER_LOW || freq > FILTER_HIGH) {
+                        return 0;
+                    }
+                    return mag;
+                });
+
+                let maxIndex = 0;
+                let maxMagnitude = 0;
+                for (let i = 0; i < filtered.length; i++) {
+                    if (filtered[i] > maxMagnitude) {
+                        maxMagnitude = filtered[i];
+                        maxIndex = i;
+                    }
+                }
+
+                const dominantFreq = frequencies[maxIndex];
+                const bpm = dominantFreq * 60;
+
+                if (!window.bpmHistory) {
+                    window.bpmHistory = [];
+                }
+                window.bpmHistory.push(bpm);
+                if (window.bpmHistory.length > 5) {
+                    window.bpmHistory.shift();
+                }
+
+                const smoothedBpm = window.bpmHistory.reduce((a, b) => a + b) / window.bpmHistory.length;
+
+                return Math.max(MIN_HR, Math.min(MAX_HR, smoothedBpm));
+            } catch (error) {
+                console.error('Error calculating heart rate:', error);
+                return 0;
+            }
+        }
+
+        async function onOpenCvReady() {
+            await initializeApp();
+        }
+
+        async function initializeApp() {
+            video = document.getElementById('videoFeed');
+            outputCanvas = document.getElementById('outputCanvas');
+            outputCtx = outputCanvas.getContext('2d');
+
+            graphCanvas = document.getElementById('graphCanvas');
+            heartRateDisplay = document.getElementById('heartRateDisplay');
+            signalGraph = new SignalGraph(graphCanvas, GRAPH_WIDTH, GRAPH_HEIGHT);
+
+            await new Promise((resolve) => {
+                const checkOpenCV = () => {
+                    if (typeof cv !== 'undefined' && cv.CascadeClassifier) resolve();
+                    else setTimeout(checkOpenCV, 100);
+                };
+                checkOpenCV();
+            });
+
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 640 },
+                    height: { ideal: 480 },
+                    facingMode: 'user'
+                }
+            });
+            video.srcObject = stream;
+            await video.play();
+
+            outputCanvas.width = video.videoWidth;
+            outputCanvas.height = video.videoHeight;
+
+            console.log('Video started successfully');
+
+            await loadFaceCascade();
+            initThreeJS();
+            initGUI();
+            processFrame();
+
+            document.addEventListener('keydown', (event) => {
+                if (event.key.toLowerCase() === 'v') {
+                    toggleOverlays();
+                    guiVisible = !guiVisible;
+                    gui.domElement.style.display = guiVisible ? 'block' : 'none';
+                }
+            });
+        }
+
+        function initGUI() {
+            gui = new dat.GUI({ closed: true });
+            gui.add(params, 'xSensitivity', 0, 10, 0.1).name('X Sensitivity');
+            gui.add(params, 'ySensitivity', 0, 10, 0.1).name('Y Sensitivity');
+            gui.add(params, 'zSensitivity', 0, 10, 0.1).name('Z Sensitivity');
+            gui.add(params, 'confidenceThreshold', 0, 0.5, 0.01).name('Confidence');
+            // Keep closed by default, no gui.open() call here.
+        }
+
+        async function loadFaceCascade() {
+            classifier = new cv.CascadeClassifier();
+            const response = await fetch(FACE_CASCADE_URL);
+            const data = new Uint8Array(await response.arrayBuffer());
+            cv.FS_createDataFile('/', 'haarcascade_frontalface_default.xml', data, true, false, false);
+            classifier.load('haarcascade_frontalface_default.xml');
+        }
+
+        async function initThreeJS() {
+            three.scene = new THREE.Scene();
+            three.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            three.renderer = new THREE.WebGLRenderer({ antialias: true });
+            three.renderer.setSize(window.innerWidth, window.innerHeight);
+            three.renderer.setClearColor(0x000000, 1);
+            three.renderer.physicallyCorrectLights = true;
+            three.renderer.outputEncoding = THREE.sRGBEncoding;
+            three.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            three.renderer.toneMappingExposure = 1.2;
+
+            document.getElementById('scene-container').appendChild(three.renderer.domElement);
+
+            three.targetCameraPosition = new THREE.Vector3(0, 0, 5);
+            three.clock = new THREE.Clock();
+
+            // Lighting
+            const hemiLight = new THREE.HemisphereLight(0x1c3144, 0xffffff, 0.5);
+            hemiLight.position.set(0, 50, 50);
+            three.scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 10, 10);
+            dirLight.target.position.set(0, 0, 0);
+            three.scene.add(dirLight);
+            three.scene.add(dirLight.target);
+
+            // Floor
+            const floorSize = 50;
+            const floorDivisions = 50;
+            const floorColor = 0xffffff;
+            const floorGrid = new THREE.GridHelper(floorSize, floorDivisions, floorColor, floorColor);
+            floorGrid.position.y = -1;
+            three.scene.add(floorGrid);
+            floorGrid.material.transparent = true;
+            floorGrid.material.opacity = 0.2;
+
+            // Walls
+            const wallSize = 50;
+            const wallDivisions = 50;
+            const wallGridColor = 0xffffff;
+
+            const wallGrid1 = new THREE.GridHelper(wallSize, wallDivisions, wallGridColor, wallGridColor);
+            wallGrid1.rotation.x = Math.PI / 2;
+            wallGrid1.position.z = -25;
+            wallGrid1.position.y = 24;
+            wallGrid1.material.transparent = true;
+            wallGrid1.material.opacity = 0.2;
+            three.scene.add(wallGrid1);
+
+            const wallGrid2 = new THREE.GridHelper(wallSize, wallDivisions, wallGridColor, wallGridColor);
+            wallGrid2.rotation.z = Math.PI / 2;
+            wallGrid2.position.x = -25;
+            wallGrid2.position.y = 24;
+            wallGrid2.material.transparent = true;
+            wallGrid2.material.opacity = 0.2;
+            three.scene.add(wallGrid2);
+
+            const wallGrid3 = new THREE.GridHelper(wallSize, wallDivisions, wallGridColor, wallGridColor);
+            wallGrid3.rotation.z = -Math.PI / 2;
+            wallGrid3.position.x = 25;
+            wallGrid3.position.y = 24;
+            wallGrid3.material.transparent = true;
+            wallGrid3.material.opacity = 0.2;
+            three.scene.add(wallGrid3);
+
+            // Cube
+            const cubeGeo = new THREE.BoxGeometry(0.25, 0.25, .25);
+            const cubeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.1, roughness: 0.1 });
+            three.cube = new THREE.Mesh(cubeGeo, cubeMat);
+            three.cube.position.set(0, 2, 0); // Y-coordinate set to 2 units above cube2
+
+            three.scene.add(three.cube);
+
+            three.camera.position.set(0, 50, 50);
+            animate();
+
+
+            // Cube 2
+            const cubeGeo2 = new THREE.BoxGeometry(2, 2, 2);
+            const cubeMat2 = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.1, roughness: 0.1 });
+            three.cube2 = new THREE.Mesh(cubeGeo2,cubeMat2 );
+            three.cube2.position.set(0, 0, 0);
+            three.scene.add(three.cube2);
+
+
+        }
+
+        function animate() {
+            three.animationFrameId = requestAnimationFrame(animate);
+            const delta = three.clock.getDelta();
+            three.mixers.forEach(mixer => mixer.update(delta));
+
+            if (three.camera && three.targetCameraPosition) {
+                three.camera.position.lerp(three.targetCameraPosition, CAMERA_LERP_FACTOR);
+                three.camera.lookAt(0, 0, 0);
+            }
+
+            // Pulse the cube and face rectangle thickness according to heart rate
+            // Use a sinusoidal function: scale factor = 1 + 0.2 * sin(2*pi*(heartRate/60)*time)
+            const time = three.clock.getElapsedTime();
+            const frequency = heartRate > 0 ? (heartRate / 60) : (60/60); // if heartRate=0, assume 60bpm default
+            const scaleFactor = 1 + 0.2 * Math.sin(2 * Math.PI * frequency * time);
+            three.cube.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+            if (three.renderer && three.scene && three.camera) {
+                three.renderer.render(three.scene, three.camera);
+            }
+
+            updateDebugOverlay(scaleFactor);
+        }
+
+        function updateDebugOverlay(scaleFactor) {
+            const debugOverlay = document.getElementById('debug-overlay');
+            debugOverlay.innerHTML = `
+                Heart Rate: ${heartRate > 0 ? heartRate.toFixed(1) : 'N/A'} bpm<br><br>
+                Face Tracking Info:<br>
+                X: ${faceInfo.normalizedX.toFixed(2)}<br>
+                Y: ${faceInfo.normalizedY.toFixed(2)}<br>
+                Size: ${faceInfo.faceSize.toFixed(2)}<br>
+                <br>
+                Camera Position:<br>
+                X: ${faceInfo.cameraX.toFixed(2)}<br>
+                Y: ${faceInfo.cameraY.toFixed(2)}<br>
+                Z: ${faceInfo.cameraZ.toFixed(2)}
+            `;
+        }
+
+        function processFrame() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                try {
+                    outputCtx.drawImage(video, 0, 0, outputCanvas.width, outputCanvas.height);
+                    let src = cv.imread(outputCanvas);
+                    let gray = new cv.Mat();
+                    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+                    if (classifier && !classifier.empty()) {
+                        const faces = new cv.RectVector();
+                        classifier.detectMultiScale(gray, faces, 1.1, 5, 0, new cv.Size(100, 100), new cv.Size(0,0));
+
+                        if (faces.size() > 0) {
+                            let largestFace = faces.get(0);
+                            let largestArea = largestFace.width * largestFace.height;
+
+                            for (let i = 1; i < faces.size(); i++) {
+                                const face = faces.get(i);
+                                const area = face.width * face.height;
+                                if (area > largestArea) {
+                                    largestFace = face;
+                                    largestArea = area;
+                                }
+                            }
+
+                            // Compute scaleFactor from the cube logic (reuse heartRate)
+                            const time = three.clock.getElapsedTime();
+                            const frequency = heartRate > 0 ? heartRate / 60 : 60/60;
+                            const scaleFactor = 1 + 0.2 * Math.sin(2 * Math.PI * frequency * time);
+                            const thickness = Math.max(1, Math.floor(scaleFactor * 3));
+
+                            // Draw largest face rectangle in white, pulsing thickness
+                            let point1 = new cv.Point(largestFace.x, largestFace.y);
+                            let point2 = new cv.Point(largestFace.x + largestFace.width, largestFace.y + largestFace.height);
+                            cv.rectangle(src, point1, point2, [255, 255, 255, 255], thickness);
+
+                            // ROIs for heart rate calculation
+                            const rois = [
+                                { x: largestFace.x + largestFace.width * 0.3, y: largestFace.y + largestFace.height * 0.1, width: largestFace.width * 0.4, height: largestFace.height * 0.15 },
+                                { x: largestFace.x + largestFace.width * 0.15, y: largestFace.y + largestFace.height * 0.4, width: largestFace.width * 0.25, height: largestFace.height * 0.25 },
+                                { x: largestFace.x + largestFace.width * 0.6, y: largestFace.y + largestFace.height * 0.4, width: largestFace.width * 0.25, height: largestFace.height * 0.25 },
+                                { x: largestFace.x + largestFace.width * 0.4, y: largestFace.y + largestFace.height * 0.3, width: largestFace.width * 0.2, height: largestFace.height * 0.2 }
+                            ];
+
+                            let totalGreenMean = 0;
+                            let validROIs = 0;
+
+                            for (const roiDef of rois) {
+                                let roiPoint1 = new cv.Point(roiDef.x, roiDef.y);
+                                let roiPoint2 = new cv.Point(roiDef.x + roiDef.width, roiDef.y + roiDef.height);
+                                cv.rectangle(src, roiPoint1, roiPoint2, [255,255,255,32], 1);
+
+                                let roiMat = src.roi(new cv.Rect(roiDef.x, roiDef.y, roiDef.width, roiDef.height));
+                                const greenMean = cv.mean(roiMat)[1];
+                                roiMat.delete();
+
+                                if (greenMean > 0) {
+                                    totalGreenMean += greenMean;
+                                    validROIs++;
+                                }
+                            }
+
+                            if (validROIs > 0) {
+                                const averageGreenMean = totalGreenMean / validROIs;
+                                temporalBuffer.push(averageGreenMean);
+                                if (temporalBuffer.length > BUFFER_SIZE) {
+                                    temporalBuffer.shift();
+
+                                    const currentTime = Date.now();
+                                    if (currentTime - lastUpdateTime.value >= 1000) {
+                                        heartRate = calculateHeartRate(temporalBuffer);
+                                        heartRateDisplay.innerHTML = `Heart Rate: ${heartRate.toFixed(1)} BPM (from ${validROIs} regions)`;
+                                        signalGraph.addPoint(heartRate);
+                                        signalGraph.draw();
+                                        lastUpdateTime.value = currentTime;
+                                    }
+                                }
+                            } else {
+                                heartRateDisplay.innerHTML = "No face detected";
+                            }
+
+                            // Face tracking & camera movement
+                            const centerX = largestFace.x + largestFace.width / 2;
+                            const centerY = largestFace.y + largestFace.height / 2;
+                            const faceSize = largestFace.width / outputCanvas.width;
+
+                            const normalizedX = (centerX / outputCanvas.width) * 2 - 1;
+                            const normalizedY = (centerY / outputCanvas.height) * 2 - 1;
+
+                            faceInfo.normalizedX = normalizedX;
+                            faceInfo.normalizedY = normalizedY;
+                            faceInfo.faceSize = faceSize;
+
+                            if (faceSize > params.confidenceThreshold) {
+                                const mappedX = -normalizedX * params.xSensitivity;
+                                const mappedY = -normalizedY * params.ySensitivity;
+                                const mappedZ = 10 - faceSize * params.zSensitivity * 5;
+                                if (three.targetCameraPosition) {
+                                    three.targetCameraPosition.set(mappedX, mappedY + 2, mappedZ);
+                                }
+
+                                faceInfo.cameraX = three.camera.position.x;
+                                faceInfo.cameraY = three.camera.position.y;
+                                faceInfo.cameraZ = three.camera.position.z;
+                            }
+                        } else {
+                            heartRateDisplay.innerHTML = "No face detected";
+                        }
+
+                        faces.delete();
+                    }
+
+                    cv.imshow(outputCanvas, src);
+                    src.delete();
+                    gray.delete();
+                } catch (err) {
+                    console.error('Error in processFrame:', err);
+                }
+
+                requestAnimationFrame(processFrame);
+            }
+        }
+
+        function toggleOverlays() {
+            videoOverlayVisible = !videoOverlayVisible;
+            debugOverlayVisible = !debugOverlayVisible;
+
+            const videoOverlay = document.getElementById('video-overlay');
+            const debugOverlay = document.getElementById('debug-overlay');
+            const graphCanvas = document.getElementById('graphCanvas');
+         
+
+            // videoOverlay.style.display = videoOverlayVisible ? 'block' : 'none';
+            graphCanvas.style.display = debugOverlayVisible ? 'block' : 'none';
+            debugOverlay.style.display = debugOverlayVisible ? 'block' : 'none';
+        }
+    </script>
+</body>
+</html>

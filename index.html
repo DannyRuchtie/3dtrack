@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Face Tracking Camera + Spline</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        #canvas3d {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+        #video-overlay {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            width: 320px;
+            height: 240px;
+            z-index: 100;
+        }
+        #videoFeed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.8;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        #outputCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #debug-overlay {
+            position: fixed;
+            top: 20px;
+            left: 340px;
+            width: 280px;
+            height: auto;
+            min-height: 240px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 10px;
+            font-family: monospace;
+            border-radius: 4px;
+            z-index: 1000;
+        }
+        .dg.ac {
+            position: fixed;
+            top: 20px !important;
+            right: 20px !important;
+            z-index: 2000 !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="video-overlay">
+        <video id="videoFeed" autoplay></video>
+        <canvas id="outputCanvas"></canvas>
+    </div>
+    <div id="debug-overlay"></div>
+    <canvas id="canvas3d"></canvas>
+
+    <!-- dat.GUI -->
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js"></script>
+    <!-- OpenCV -->
+    <script async src="https://docs.opencv.org/4.7.0/opencv.js" onload="onOpenCvReady()"></script>
+    <!-- Spline Runtime -->
+    <script type="module">
+        import { Application } from 'https://unpkg.com/@splinetool/runtime@1.0.50/build/runtime.js';
+        
+        window.initSpline = async function() {
+            const canvas = document.getElementById('canvas3d');
+            const app = new Application(canvas);
+            const spline = await app.load('https://prod.spline.design/3pAzXsubpMgrqCEh/scene.splinecode');
+            window.splineCamera = spline.camera;
+            console.log('Spline scene loaded');
+        }
+    </script>
+
+    <script>
+        const FACE_CASCADE_URL = 'haarcascade_frontalface_default.xml';
+        const CAMERA_LERP_FACTOR = 0.1;
+
+        const params = {
+            xSensitivity: 4,
+            ySensitivity: 4,
+            zSensitivity: 3,
+            confidenceThreshold: 0.1
+        };
+
+        let video, outputCanvas, outputCtx, classifier;
+        let gui, guiVisible = true;
+        let faceInfo = { normalizedX: 0, normalizedY: 0, faceSize: 0, cameraX: 0, cameraY: 0, cameraZ: 0 };
+
+        async function onOpenCvReady() {
+            await initializeApp();
+        }
+
+        async function initializeApp() {
+            try {
+                video = document.getElementById('videoFeed');
+                outputCanvas = document.getElementById('outputCanvas');
+                outputCtx = outputCanvas.getContext('2d');
+
+                await new Promise((resolve) => {
+                    const checkOpenCV = () => {
+                        if (typeof cv !== 'undefined' && cv.CascadeClassifier) resolve();
+                        else setTimeout(checkOpenCV, 100);
+                    };
+                    checkOpenCV();
+                });
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: 'user'
+                    }
+                });
+                video.srcObject = stream;
+                await video.play();
+
+                outputCanvas.width = video.videoWidth;
+                outputCanvas.height = video.videoHeight;
+
+                console.log('Video started successfully');
+
+                await loadFaceCascade();
+                await window.initSpline();
+                initGUI();
+                processFrame();
+
+                document.addEventListener('keydown', (event) => {
+                    if (event.key.toLowerCase() === 'v') {
+                        toggleOverlays();
+                        guiVisible = !guiVisible;
+                        gui.domElement.style.display = guiVisible ? 'block' : 'none';
+                    }
+                });
+            } catch (error) {
+                console.error('Error during initialization:', error);
+            }
+        }
+
+        function initGUI() {
+            gui = new dat.GUI({ closed: true });
+            gui.add(params, 'xSensitivity', 0, 10, 0.1).name('X Sensitivity');
+            gui.add(params, 'ySensitivity', 0, 10, 0.1).name('Y Sensitivity');
+            gui.add(params, 'zSensitivity', 0, 10, 0.1).name('Z Sensitivity');
+            gui.add(params, 'confidenceThreshold', 0, 0.5, 0.01).name('Confidence');
+        }
+
+        async function loadFaceCascade() {
+            try {
+                classifier = new cv.CascadeClassifier();
+                const response = await fetch(FACE_CASCADE_URL);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const buffer = await response.arrayBuffer();
+                const data = new Uint8Array(buffer);
+                cv.FS_createDataFile('/', 'haarcascade_frontalface_default.xml', data, true, false, false);
+                classifier.load('haarcascade_frontalface_default.xml');
+            } catch (error) {
+                console.error('Error loading face cascade:', error);
+                throw error;
+            }
+        }
+
+        function processFrame() {
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                try {
+                    outputCtx.drawImage(video, 0, 0, outputCanvas.width, outputCanvas.height);
+                    let src = cv.imread(outputCanvas);
+                    let gray = new cv.Mat();
+                    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+
+                    if (classifier && !classifier.empty()) {
+                        const faces = new cv.RectVector();
+                        classifier.detectMultiScale(gray, faces, 1.1, 5, 0, new cv.Size(100, 100), new cv.Size(0,0));
+
+                        if (faces.size() > 0) {
+                            let largestFace = faces.get(0);
+                            let largestArea = largestFace.width * largestFace.height;
+
+                            for (let i = 1; i < faces.size(); i++) {
+                                const face = faces.get(i);
+                                const area = face.width * face.height;
+                                if (area > largestArea) {
+                                    largestFace = face;
+                                    largestArea = area;
+                                }
+                            }
+
+                            // Draw face rectangle in white
+                            let point1 = new cv.Point(largestFace.x, largestFace.y);
+                            let point2 = new cv.Point(largestFace.x + largestFace.width, largestFace.y + largestFace.height);
+                            cv.rectangle(src, point1, point2, [255, 255, 255, 255], 2);
+
+                            // Face tracking calculations
+                            const centerX = largestFace.x + largestFace.width / 2;
+                            const centerY = largestFace.y + largestFace.height / 2;
+                            const faceSize = largestFace.width / outputCanvas.width;
+
+                            const normalizedX = (centerX / outputCanvas.width) * 2 - 1;
+                            const normalizedY = (centerY / outputCanvas.height) * 2 - 1;
+
+                            faceInfo.normalizedX = normalizedX;
+                            faceInfo.normalizedY = normalizedY;
+                            faceInfo.faceSize = faceSize;
+
+                            // Calculate camera position values and update Spline camera
+                            const mappedX = -normalizedX * params.xSensitivity;
+                            const mappedY = -normalizedY * params.ySensitivity;
+                            const mappedZ = 10 - faceSize * params.zSensitivity * 5;
+
+                            faceInfo.cameraX = mappedX;
+                            faceInfo.cameraY = mappedY + 2;
+                            faceInfo.cameraZ = mappedZ;
+
+                            // Update Spline camera if available
+                            if (window.splineCamera) {
+                                window.splineCamera.position.x += (mappedX - window.splineCamera.position.x) * CAMERA_LERP_FACTOR;
+                                window.splineCamera.position.y += ((mappedY + 2) - window.splineCamera.position.y) * CAMERA_LERP_FACTOR;
+                                window.splineCamera.position.z += (mappedZ - window.splineCamera.position.z) * CAMERA_LERP_FACTOR;
+                                window.splineCamera.lookAt([0, 0, 0]);
+                            }
+
+                            // Update debug overlay
+                            const debugOverlay = document.getElementById('debug-overlay');
+                            debugOverlay.innerHTML = `
+                                Face Tracking Info:<br>
+                                X: ${faceInfo.normalizedX.toFixed(2)}<br>
+                                Y: ${faceInfo.normalizedY.toFixed(2)}<br>
+                                Size: ${faceInfo.faceSize.toFixed(2)}<br>
+                                <br>
+                                Camera Position:<br>
+                                X: ${faceInfo.cameraX.toFixed(2)}<br>
+                                Y: ${faceInfo.cameraY.toFixed(2)}<br>
+                                Z: ${faceInfo.cameraZ.toFixed(2)}
+                            `;
+                        } else {
+                            console.log('No faces detected in this frame');
+                            document.getElementById('debug-overlay').innerHTML = 'No face detected';
+                        }
+
+                        faces.delete();
+                    }
+
+                    cv.imshow(outputCanvas, src);
+                    src.delete();
+                    gray.delete();
+                } catch (err) {
+                    console.error('Error in processFrame:', err);
+                }
+
+                requestAnimationFrame(processFrame);
+            }
+        }
+
+        function toggleOverlays() {
+            const videoOverlay = document.getElementById('video-overlay');
+            const debugOverlay = document.getElementById('debug-overlay');
+            videoOverlay.style.display = videoOverlay.style.display === 'none' ? 'block' : 'none';
+            debugOverlay.style.display = debugOverlay.style.display === 'none' ? 'block' : 'none';
+        }
+    </script>
+</body>
+</html>
