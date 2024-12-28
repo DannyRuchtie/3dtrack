@@ -77,7 +77,7 @@ If your camera's ID is different from the default:
 
 ## Keyboard Shortcuts
 
-- Press `V` to toggle visibility of the video feed, debug overlay, and controls
+- Press `1` to toggle visibility of the video feed, debug overlay, and controls
 
 ## Technical Details
 

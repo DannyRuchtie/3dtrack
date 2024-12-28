@@ -59,29 +59,51 @@ async function loadSplineScene(sceneUrl) {
     try {
         await window.splineApp.load(sceneUrl);
         
-        // Get camera by ID
-        window.splineCamera = window.splineApp.findObjectById(CONFIG.CAMERA_ID);
-        if (window.splineCamera) {
-            // Store initial camera position
-            window.cameraBasePosition = {
-                x: window.splineCamera.position.x,
-                y: window.splineCamera.position.y,
-                z: window.splineCamera.position.z
-            };
-            console.log('Initial camera position:', window.cameraBasePosition);
-
-            // Disable camera controls
-            if (window.splineCamera.controls) {
-                window.splineCamera.controls.enabled = false;
+        // First try to find camera by ID
+        let camera = window.splineApp.findObjectById(CONFIG.CAMERA_ID);
+        
+        // If not found, try to find any camera in the scene
+        if (!camera) {
+            console.log('Default camera not found, searching for any camera...');
+            const allObjects = window.splineApp.getAllObjects();
+            camera = allObjects.find(obj => obj.type.includes('Camera'));
+            
+            if (camera) {
+                console.log('Found camera with ID:', camera.id);
+                // Update CONFIG for future use
+                CONFIG.CAMERA_ID = camera.id;
             }
-        } else {
-            console.error('Could not find camera');
         }
 
-        console.log('Available variables:', window.splineApp.getVariables());
-        return true;
+        if (camera) {
+            window.splineCamera = camera;
+            // Store initial camera position
+            window.cameraBasePosition = {
+                x: camera.position.x,
+                y: camera.position.y,
+                z: camera.position.z
+            };
+            console.log('Initial camera position:', window.cameraBasePosition);
+            console.log('Camera type:', camera.type);
+
+            // Disable camera controls
+            if (camera.controls) {
+                camera.controls.enabled = false;
+            }
+            
+            // Reset zoom base when loading new scene
+            window.cameraBaseZoom = camera.zoom || 1;
+            
+            return true;
+        } else {
+            console.error('No camera found in scene. Please ensure your scene has a camera.');
+            alert('No camera found in the scene. Please check the console for more information.');
+            return false;
+        }
+
     } catch (error) {
         console.error('Error loading scene:', error);
+        alert('Error loading scene. Please check the console for more information.');
         return false;
     }
 }
@@ -148,7 +170,7 @@ async function initializeApp() {
 
         // Setup keyboard shortcuts
         document.addEventListener('keydown', (event) => {
-            if (event.key.toLowerCase() === 'v') {
+            if (event.key === '1') {
                 toggleOverlays();
                 guiVisible = !guiVisible;
                 gui.domElement.style.display = guiVisible ? 'block' : 'none';
