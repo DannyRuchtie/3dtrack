@@ -115,17 +115,29 @@ function updateCamera(normalizedX, normalizedY, faceSize) {
 
 // Update debug overlay
 function updateDebugOverlay(normalizedX, normalizedY, faceSize, isOrthographic) {
-    const debugOverlay = document.getElementById('debug-overlay');
-    debugOverlay.innerHTML = `
-        Face Tracking Info:<br>
-        X: ${normalizedX.toFixed(2)}<br>
-        Y: ${normalizedY.toFixed(2)}<br>
-        Size: ${faceSize.toFixed(2)}<br>
-        <br>
-        Camera Info:<br>
-        Type: ${isOrthographic ? 'Orthographic' : 'Perspective'}<br>
-        X: ${window.splineCamera.position.x.toFixed(2)}<br>
-        Y: ${window.splineCamera.position.y.toFixed(2)}<br>
-        Zoom: ${window.splineCamera.zoom.toFixed(2)}
-    `;
+    try {
+        const debugOverlay = document.getElementById('debug-overlay');
+        if (!debugOverlay || !window.splineCamera) return;
+
+        const cameraPos = window.splineCamera.position || { x: 0, y: 0, z: 0 };
+        const cameraZoom = window.splineCamera.zoom || 1;
+
+        debugOverlay.innerHTML = `
+            Face Tracking Info:<br>
+            X: ${normalizedX.toFixed(2)}<br>
+            Y: ${normalizedY.toFixed(2)}<br>
+            Size: ${faceSize.toFixed(2)}<br>
+            <br>
+            Camera Info:<br>
+            Type: ${isOrthographic ? 'Orthographic' : 'Perspective'}<br>
+            X: ${cameraPos.x.toFixed(2)}<br>
+            Y: ${cameraPos.y.toFixed(2)}<br>
+            Zoom: ${cameraZoom.toFixed(2)}<br>
+            <br>
+            Scene Info:<br>
+            Camera ID: ${window.splineCamera.id}
+        `;
+    } catch (err) {
+        console.error('Error updating debug overlay:', err);
+    }
 } 

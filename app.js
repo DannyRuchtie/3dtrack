@@ -170,7 +170,7 @@ async function initializeApp() {
 
         // Setup keyboard shortcuts
         document.addEventListener('keydown', (event) => {
-            if (event.key === '1') {
+            if (event.key.toLowerCase() === 'd') {
                 toggleOverlays();
                 guiVisible = !guiVisible;
                 gui.domElement.style.display = guiVisible ? 'block' : 'none';

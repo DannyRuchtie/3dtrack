@@ -4,6 +4,10 @@
 
 A web application that uses face tracking to control a 3D camera in Spline scenes. The application tracks your face movements through your webcam and maps them to camera movements in the 3D scene.
 
+## Credits
+
+The 3D models and scenes used in this project are from [Spline.design](https://spline.design)'s library. Special thanks to the Spline team for providing these assets.
+
 ## Features
 
 - Real-time face tracking using OpenCV.js
@@ -77,7 +81,7 @@ If your camera's ID is different from the default:
 
 ## Keyboard Shortcuts
 
-- Press `1` to toggle visibility of the video feed, debug overlay, and controls
+- Press `d` to toggle visibility of the video feed, debug overlay, and controls panel (d for debug/display)
 
 ## Technical Details
 
