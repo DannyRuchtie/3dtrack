@@ -39,12 +39,23 @@ The control panel provides several adjustments:
    - For best results, use Orthographic camera type
    - Make sure the camera is not locked or constrained
 
-3. Export your scene:
+3. Set up camera variables in Spline:
+   - Select your camera in the Objects panel
+   - In the Events panel, create a "Start" event
+   - Add three "Set Variable" actions:
+     - `CameraX`: Link to Camera Position X
+     - `CameraY`: Link to Camera Position Y
+     - `CameraZ`: Link to Camera Position Z
+
+Here's how your Spline settings should look:
+![Spline Camera Variables Setup](images/spline.png)
+
+4. Export your scene:
    - Click the "Export" button in Spline
    - Choose "Web" as the export type
    - Copy the scene URL (it should end with `.splinecode`)
 
-4. Load your scene:
+5. Load your scene:
    - In the application, expand the "Scene" folder in the controls
    - Paste your scene URL in the "Scene URL" field
    - Click "Load Scene" to apply
