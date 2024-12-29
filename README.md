@@ -1,6 +1,6 @@
 # 3D Face Tracking Camera Control
 
-![3D Face Tracking Demo](images/3DTrack.png)
+![3D Face Tracking Demo](images/3dface.gif)
 
 A web application that uses face tracking to control a 3D camera in Spline scenes. The application tracks your face movements through your webcam and maps them to camera movements in the 3D scene.
 
@@ -25,6 +25,8 @@ The application uses your webcam to track your face position and maps it to came
 - Moving your head left/right → Camera moves right/left
 - Moving your head up/down → Camera moves down/up
 - Moving closer/further → Camera zooms in/out (in orthographic mode) or moves forward/backward (in perspective mode)
+
+![3D Face Tracking Demo](images/3DTrack.png)
 
 ## Controls
 
