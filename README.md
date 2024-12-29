@@ -4,6 +4,10 @@
 
 A web application that uses face tracking to control a 3D camera in Spline scenes. The application tracks your face movements through your webcam and maps them to camera movements in the 3D scene.
 
+## Demo
+
+Try the live demo at [https://dannyruchtie.com/3dFace/](https://dannyruchtie.com/3dFace/)
+
 ## Credits
 
 The 3D models and scenes used in this project are from [Spline.design](https://spline.design)'s library. Special thanks to the Spline team for providing these assets.
