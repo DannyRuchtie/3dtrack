@@ -2,7 +2,7 @@
 const CONFIG = {
     FACE_CASCADE_URL: 'haarcascade_frontalface_default.xml',
     SPLINE_RUNTIME_VERSION: '1.9.54',
-    DEFAULT_SCENE_URL: 'https://prod.spline.design/3pAzXsubpMgrqCEh/scene.splinecode',
+    DEFAULT_SCENE_URL: 'https://prod.spline.design/zSNYltw4QkdUTWOS/scene.splinecode',
     CAMERA_ID: '56c30b36-44df-48b7-89f1-27070018dad0'
 };
 

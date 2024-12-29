@@ -69,44 +69,27 @@ function updateCamera(normalizedX, normalizedY, faceSize) {
             // Calculate new positions with GUI-controlled sensitivity
             const sensitivityX = 100 * params.xSensitivity;
             const sensitivityY = 100 * params.ySensitivity;
-            const sensitivityZ = 400 * params.zSensitivity;
+            const sensitivityZ = 50 * params.zSensitivity;
 
             const newX = baseX + (-normalizedX * sensitivityX);
             const newY = baseY + (-normalizedY * sensitivityY);
             
-            // Check camera type
-            const isOrthographic = window.splineCamera.type === 'OrthographicCamera';
-            const lerpFactor = params.confidenceThreshold;
-
-            // Handle zoom/depth based on face size
-            const neutralFaceSize = 0.25;
-            const zOffset = (faceSize - neutralFaceSize) * sensitivityZ;
-            let currentZoom = window.splineCamera.zoom || 1;
-
-            if (isOrthographic) {
-                // Store initial zoom if not already stored
-                if (!window.cameraBaseZoom) {
-                    window.cameraBaseZoom = currentZoom;
-                }
-                
-                // Calculate new zoom
-                const zoomChange = zOffset / 1000;
-                const targetZoom = window.cameraBaseZoom * (1 - zoomChange);
-                const clampedZoom = Math.max(0.5, Math.min(2, targetZoom));
-                
-                // Smoothly interpolate zoom
-                window.splineCamera.zoom = currentZoom + (clampedZoom - currentZoom) * lerpFactor;
-            }
-
+            // Handle Z position based on face size
+            const neutralFaceSize = 0.3;
+            const zoomFactor = faceSize / neutralFaceSize;
+            const newZ = baseZ + ((1 - zoomFactor) * sensitivityZ);
+            
             // Update position with interpolation
+            const lerpFactor = params.confidenceThreshold;
             window.splineCamera.position.x += (newX - window.splineCamera.position.x) * lerpFactor;
             window.splineCamera.position.y += (newY - window.splineCamera.position.y) * lerpFactor;
+            window.splineCamera.position.z += (newZ - window.splineCamera.position.z) * lerpFactor;
 
             // Force render update
             window.splineApp.render();
 
             // Update debug overlay
-            updateDebugOverlay(normalizedX, normalizedY, faceSize, isOrthographic);
+            updateDebugOverlay(normalizedX, normalizedY, faceSize);
         } catch (err) {
             console.error('Error updating camera:', err.message);
         }
@@ -114,13 +97,12 @@ function updateCamera(normalizedX, normalizedY, faceSize) {
 }
 
 // Update debug overlay
-function updateDebugOverlay(normalizedX, normalizedY, faceSize, isOrthographic) {
+function updateDebugOverlay(normalizedX, normalizedY, faceSize) {
     try {
         const debugOverlay = document.getElementById('debug-overlay');
         if (!debugOverlay || !window.splineCamera) return;
 
         const cameraPos = window.splineCamera.position || { x: 0, y: 0, z: 0 };
-        const cameraZoom = window.splineCamera.zoom || 1;
 
         debugOverlay.innerHTML = `
             Face Tracking Info:<br>
@@ -129,10 +111,10 @@ function updateDebugOverlay(normalizedX, normalizedY, faceSize, isOrthographic) 
             Size: ${faceSize.toFixed(2)}<br>
             <br>
             Camera Info:<br>
-            Type: ${isOrthographic ? 'Orthographic' : 'Perspective'}<br>
+            Type: Perspective<br>
             X: ${cameraPos.x.toFixed(2)}<br>
             Y: ${cameraPos.y.toFixed(2)}<br>
-            Zoom: ${cameraZoom.toFixed(2)}<br>
+            Z: ${cameraPos.z.toFixed(2)}<br>
             <br>
             Scene Info:<br>
             Camera ID: ${window.splineCamera.id}
