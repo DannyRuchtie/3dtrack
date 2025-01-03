@@ -22,7 +22,7 @@ The 3D models and scenes used in this project are from [Spline.design](https://s
 - Live debug overlay showing tracking data
 - Easy scene switching through URL input
 
-#Privacy Statement
+## Privacy Statement
 
 This project is designed with user privacy as a top priority. The face tracking functionality is performed entirely on your local device. No data is sent to external servers or third-party services for processing.
 
