@@ -22,6 +22,14 @@ The 3D models and scenes used in this project are from [Spline.design](https://s
 - Live debug overlay showing tracking data
 - Easy scene switching through URL input
 
+#Privacy Statement
+
+This project is designed with user privacy as a top priority. The face tracking functionality is performed entirely on your local device. No data is sent to external servers or third-party services for processing.
+
+By keeping all operations on-device, this project ensures that your personal data, including facial data, remains private and secure. You can use this tool with confidence, knowing that your privacy is fully protected.
+
+If you have any questions about how your data is handled, feel free to explore the source code.
+
 ## How It Works
 
 The application uses your webcam to track your face position and maps it to camera movements in the 3D scene:
