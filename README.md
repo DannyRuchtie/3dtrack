@@ -6,7 +6,7 @@ A web application that uses face tracking to control a 3D camera in Spline scene
 
 ## Demo
 
-Try the live demo at [https://dannyruchtie.com/3dFace/](https://dannyruchtie.com/3dFace/)
+Try the live demo at [https://dannyruchtie.com/3dFace/](https://dannyruchtie.com/special/3dFace/)
 
 ## Credits
 
